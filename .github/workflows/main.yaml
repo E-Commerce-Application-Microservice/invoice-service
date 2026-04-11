@@ -48,7 +48,7 @@ jobs:
             Project: ${{ github.repository }}
             Status: Vulnerabilities or Quality Gate issues found.
             Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          to: ${{ secrets.RECIVER_EMAIL }}
+          to: ${{ secrets.EMAIL_USERNAME }}
           from: DevOps Alert
  
       - name: Send Notification on Success
@@ -65,5 +65,5 @@ jobs:
             Project: ${{ github.repository }}
             Status: All Quality Gates passed successfully.
             View Report: ${{ secrets.SONAR_HOST_URL }}/dashboard?id=hospital-management-system
-          to: ${{ secrets.RECIVER_EMAIL }}
+          to: ${{ secrets.EMAIL_USERNAME }}
           from: DevOps Alert
