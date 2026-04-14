@@ -1,0 +1,125 @@
+name: Build, Scan & Push Secure Image (Invoice)
+
+on:
+  workflow_run:
+    workflows: ["Snyk"]   # MUST match exactly
+    types:
+      - completed
+    branches:
+      - main
+      - ci-pipelines
+
+  workflow_dispatch:
+    inputs:
+      docker_tag:
+        description: 'Docker Image Tag (e.g., v1.0.5)'
+        required: true
+        default: 'latest'
+
+env:
+  IMAGE_NAME: invoice
+
+jobs:
+  docker-security-scan:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # ✅ Checkout
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # 🔢 Version Handling (Manual OR Auto)
+      - name: Set Version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.docker_tag }}" >> $GITHUB_ENV
+            echo "Using manual tag: ${{ github.event.inputs.docker_tag }}"
+          else
+            VERSION_FILE="version.txt"
+
+            if [ ! -f $VERSION_FILE ]; then
+              echo "v1.0.0" > $VERSION_FILE
+            fi
+
+            CURRENT=$(cat $VERSION_FILE)
+            MAJOR=$(echo $CURRENT | cut -d. -f1 | tr -d 'v')
+            MINOR=$(echo $CURRENT | cut -d. -f2)
+            PATCH=$(echo $CURRENT | cut -d. -f3)
+
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+
+            echo $NEW_VERSION > $VERSION_FILE
+            echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+            echo "Using auto-generated tag: $NEW_VERSION"
+          fi
+
+      # 🐳 Build Image
+      - name: Build Docker image
+        run: |
+          docker build -t $IMAGE_NAME:${{ env.VERSION }} .
+
+      # 🔧 Install Trivy
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          | sudo sh -s -- -b /usr/local/bin
+
+      # 📄 Download Template
+      - name: Download Trivy Template
+        run: |
+          mkdir -p trivy-templates
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl \
+          -o trivy-templates/html.tpl
+
+      # 🔍 Security Scan (FAIL PIPELINE if vulnerabilities found)
+      - name: Trivy Scan (Fail on HIGH/CRITICAL)
+        run: |
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE_NAME:${{ env.VERSION }}
+
+      # 📊 Generate Report (only if scan passes)
+      - name: Generate Trivy Report
+        if: success()
+        run: |
+          trivy image \
+            --format template \
+            --template "trivy-templates/html.tpl" \
+            --output trivy-report.html \
+            $IMAGE_NAME:${{ env.VERSION }}
+
+      # 🔐 Docker Login
+      - name: Login to DockerHub
+        if: success()
+        run: |
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login \
+          -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+
+      # 🚀 Push Image
+      - name: Push Image
+        if: success()
+        run: |
+          docker tag $IMAGE_NAME:${{ env.VERSION }} \
+          ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:${{ env.VERSION }}
+
+          docker push ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:${{ env.VERSION }}
+
+      # 📧 Email Report (ALWAYS runs)
+      - name: Email Report
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Invoice Service Scan Report - ${{ env.VERSION }}"
+          to: ${{ secrets.EMAIL_USERNAME }}
+          from: CI Scanner <${{ secrets.EMAIL_USERNAME }}>
+          body: |
+            Repo   : ${{ github.repository }}
+            Commit : ${{ github.sha }}
+            Tag    : ${{ env.VERSION }}
+            Status : ${{ job.status }}
+          attachments: trivy-report.html

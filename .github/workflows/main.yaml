@@ -1,0 +1,69 @@
+name: SonarQube Scan & Alert
+ 
+on:
+  push:
+    branches:
+      - ci-pipelines
+  pull_request: # Highly recommended
+    types: [opened, synchronize, reopened]
+ 
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+ 
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=invoice_service
+            -Dsonar.sources=.
+ 
+      - name: SonarQube Quality Gate Check
+        id: sonarqube-quality-gate-check
+        uses: sonarsource/sonarqube-quality-gate-action@v1
+        # Set a timeout so it doesn't wait forever if the server is down
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+ 
+      - name: Send Notification on Failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "❌ Pipeline Failed: ${{ github.repository }}"
+          body: |
+            Ashuthos says: SonarQube Scan Failed!
+            Project: ${{ github.repository }}
+            Status: Vulnerabilities or Quality Gate issues found.
+            Check the logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ secrets.EMAIL_USERNAME }}
+          from: DevOps Alert
+ 
+      - name: Send Notification on Success
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ Pipeline Success: ${{ github.repository }}"
+          body: |
+            Ashuthos says: SonarQube Scan Passed!
+            Project: ${{ github.repository }}
+            Status: All Quality Gates passed successfully.
+            View Report: ${{ secrets.SONAR_HOST_URL }}/dashboard?id=hospital-management-system
+          to: ${{ secrets.EMAIL_USERNAME }}
+          from: DevOps Alert

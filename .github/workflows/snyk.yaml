@@ -1,0 +1,31 @@
+name: Snyk
+on:
+  workflow_run:
+    # ⚠️ REPLACE "SonarQube Scan" with the EXACT 'name:' found at the top of your main.yml
+    workflows: ["SonarQube Scan & Alert"] 
+    types:
+      - completed
+    branches:
+      - main
+      - ci-pipelines
+
+jobs:
+  snyk: # Your job name might differ
+    # This ensures it ONLY runs if the upstream workflow passed
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: npm install
+        
+ 
+      - name: Install Snyk CLI
+        uses: snyk/actions/setup@master
+ 
+      - name: Snyk Monitor
+        run: snyk monitor --all-project
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
